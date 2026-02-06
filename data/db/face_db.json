@@ -1,11 +1,8 @@
 {
-  "updated_at": "2026-02-01 21:05:19",
+  "updated_at": "2026-02-06 09:28:55",
   "embedding_dim": 512,
   "names": [
-    "Chirs",
-    "Pacifique",
-    "charles",
-    "fique"
+    "Pacifique"
   ],
-  "samples_total_used": 11
+  "samples_total_used": 4
 }
