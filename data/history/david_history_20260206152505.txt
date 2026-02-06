@@ -1,0 +1,19 @@
+Face Locking History for: David
+Session started: 2026-02-06 15:25:05
+==================================================
+Timestamp		Action Type	Description		Value
+----------------------------------------------------------------------
+15:25:10.215	movement		face moved right	572.000
+15:25:10.677	movement		face moved left	554.000
+15:25:11.365	movement		face moved right	399.000
+15:25:11.697	movement		face moved left	219.000
+15:25:12.035	movement		face moved left	74.000
+15:25:12.367	movement		face moved left	109.500
+15:25:12.702	movement		face moved left	62.500
+15:25:13.103	smile		smile or laugh detected	0.518
+----------------------------------------------------------------------
+Session ended: 2026-02-06 15:25:16
+Total actions recorded: 8
+Action Summary:
+  movement: 7
+  smile: 1

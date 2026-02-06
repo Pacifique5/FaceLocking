@@ -36,9 +36,9 @@ from .recognize import (
 @dataclass
 class FaceLockConfig:
     # Face locking parameters
-    lock_confidence_threshold: float = 0.66  # similarity threshold to lock
+    lock_confidence_threshold: float = 0.75  # similarity threshold to lock (increased for accuracy)
     lock_timeout_seconds: float = 3.0        # release lock after this time without detection
-    tracking_tolerance: float = 0.45         # lower threshold while tracking
+    tracking_tolerance: float = 0.70         # lower threshold while tracking (increased for accuracy)
     
     # Action detection parameters
     movement_threshold: float = 30.0         # pixels for left/right movement
@@ -195,7 +195,7 @@ class FaceLockingSystem:
         self.target_identity = target_identity
         
         # Initialize components
-        self.detector = HaarFaceMesh5pt(min_size=(70, 70), debug=False)
+        self.detector = HaarFaceMesh5pt(min_size=(100, 100), debug=False)  # Larger min size for better quality
         self.embedder = ArcFaceEmbedderONNX(
             model_path="models/embedder_arcface.onnx", 
             input_size=(112, 112)
@@ -203,7 +203,7 @@ class FaceLockingSystem:
         
         # Load face database
         db = load_db_npz(Path("data/db/face_db.npz"))
-        self.matcher = FaceDBMatcher(db=db, dist_thresh=0.34)
+        self.matcher = FaceDBMatcher(db=db, dist_thresh=0.30)  # Stricter threshold for better accuracy
         
         # Action detection
         self.action_detector = ActionDetector(config)
@@ -231,25 +231,35 @@ class FaceLockingSystem:
         # Detect all faces
         faces = self.detector.detect(frame, max_faces=5)
         
+        # Identify all faces (for labeling)
+        face_identities = self._identify_all_faces(faces, frame)
+        
         if self.is_locked:
             # If locked, try to maintain lock
-            self._update_locked_face(faces, frame)
+            self._update_locked_face(faces, frame, face_identities)
         else:
             # If not locked, try to find target identity
-            self._try_lock_target(faces, frame)
+            self._try_lock_target(faces, frame, face_identities)
         
-        # Draw visualization
-        self._draw_visualization(vis_frame, faces)
+        # Draw visualization with all identities
+        self._draw_visualization(vis_frame, faces, face_identities)
         
         return vis_frame
     
-    def _try_lock_target(self, faces: List[FaceDet], frame: np.ndarray):
-        """Try to lock onto target identity"""
-        for face in faces:
-            # Get face embedding
+    def _identify_all_faces(self, faces: List[FaceDet], frame: np.ndarray) -> Dict[int, MatchResult]:
+        """Identify all detected faces and return their match results"""
+        identities = {}
+        for i, face in enumerate(faces):
             aligned, _ = align_face_5pt(frame, face.kps, out_size=(112, 112))
             embedding = self.embedder.embed(aligned)
             match_result = self.matcher.match(embedding)
+            identities[i] = match_result
+        return identities
+    
+    def _try_lock_target(self, faces: List[FaceDet], frame: np.ndarray, face_identities: Dict[int, MatchResult]):
+        """Try to lock onto target identity"""
+        for i, face in enumerate(faces):
+            match_result = face_identities[i]
             
             # Check if this is our target with high confidence
             if (match_result.name == self.target_identity and 
@@ -270,27 +280,25 @@ class FaceLockingSystem:
                 print(f"🔒 LOCKED onto {self.target_identity} (similarity: {match_result.similarity:.3f})")
                 break
     
-    def _update_locked_face(self, faces: List[FaceDet], frame: np.ndarray):
+    def _update_locked_face(self, faces: List[FaceDet], frame: np.ndarray, face_identities: Dict[int, MatchResult]):
         """Update locked face tracking"""
         current_time = time.time()
-        best_match: Optional[Tuple[FaceDet, float]] = None
+        best_match: Optional[Tuple[FaceDet, float, int]] = None
         
         # Find best matching face for our locked target
-        for face in faces:
-            aligned, _ = align_face_5pt(frame, face.kps, out_size=(112, 112))
-            embedding = self.embedder.embed(aligned)
-            match_result = self.matcher.match(embedding)
+        for i, face in enumerate(faces):
+            match_result = face_identities[i]
             
             # Use lower threshold while tracking
             if (match_result.name == self.target_identity and 
                 match_result.similarity >= self.config.tracking_tolerance):
                 
                 if best_match is None or match_result.similarity > best_match[1]:
-                    best_match = (face, match_result.similarity)
+                    best_match = (face, match_result.similarity, i)
         
         if best_match is not None:
             # Update locked face
-            face, similarity = best_match
+            face, similarity, face_idx = best_match
             self.locked_face = face
             self.last_detection_time = current_time
             
@@ -366,20 +374,35 @@ class FaceLockingSystem:
                 for action_type, count in action_counts.items():
                     f.write(f"  {action_type}: {count}\n")
     
-    def _draw_visualization(self, frame: np.ndarray, faces: List[FaceDet]):
+    def _draw_visualization(self, frame: np.ndarray, faces: List[FaceDet], face_identities: Dict[int, MatchResult]):
         """Draw visualization on frame"""
         h, w = frame.shape[:2]
         
-        # Draw all detected faces
-        for face in faces:
-            color = (0, 255, 0)  # Green for regular faces
-            thickness = 2
+        # Draw all detected faces with their identities
+        for i, face in enumerate(faces):
+            match_result = face_identities[i]
             
-            # Highlight locked face
+            # Determine if this is the locked face
+            is_locked_face = False
             if self.is_locked and self.locked_face is not None:
-                if self._faces_similar(face, self.locked_face):
-                    color = (0, 0, 255)  # Red for locked face
-                    thickness = 4
+                is_locked_face = self._faces_similar(face, self.locked_face)
+            
+            # Color coding:
+            # - Red (thick) = Locked target face
+            # - Green = Identified face (not locked)
+            # - Yellow = Unknown face
+            if is_locked_face:
+                color = (0, 0, 255)  # Red for locked face
+                thickness = 4
+                label = f"Locked {match_result.name}"
+            elif match_result.accepted:
+                color = (0, 255, 0)  # Green for identified face
+                thickness = 2
+                label = f"{match_result.name} Unlocked"
+            else:
+                color = (0, 255, 255)  # Yellow for unknown
+                thickness = 2
+                label = "Unknown"
             
             # Draw bounding box
             cv2.rectangle(frame, (face.x1, face.y1), (face.x2, face.y2), color, thickness)
@@ -387,11 +410,31 @@ class FaceLockingSystem:
             # Draw landmarks
             for (x, y) in face.kps.astype(int):
                 cv2.circle(frame, (int(x), int(y)), 3, color, -1)
+            
+            # Similarity text
+            similarity_text = f"sim: {match_result.similarity:.2f}"
+            
+            # Label background for readability
+            label_size, _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
+            sim_size, _ = cv2.getTextSize(similarity_text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+            
+            # Draw label background
+            cv2.rectangle(frame, 
+                         (face.x1, face.y1 - label_size[1] - sim_size[1] - 15), 
+                         (face.x1 + max(label_size[0], sim_size[0]) + 10, face.y1), 
+                         (0, 0, 0), -1)
+            
+            # Draw text
+            cv2.putText(frame, label, (face.x1 + 5, face.y1 - sim_size[1] - 10), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+            cv2.putText(frame, similarity_text, (face.x1 + 5, face.y1 - 5), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
         
         # Draw status information
         status_lines = [
             f"Target: {self.target_identity}",
             f"Status: {'🔒 LOCKED' if self.is_locked else '🔍 SEARCHING'}",
+            f"Faces Detected: {len(faces)}",
         ]
         
         if self.is_locked and self.lock_start_time:
@@ -435,6 +478,20 @@ class FaceLockingSystem:
 # -------------------------
 # Main Application
 # -------------------------
+
+def find_available_camera():
+    """Find the first available camera"""
+    print("🔍 Searching for available cameras...")
+    for camera_idx in [0, 1, 2]:
+        cap = cv2.VideoCapture(camera_idx)
+        if cap.isOpened():
+            # Test if we can actually read a frame
+            ret, _ = cap.read()
+            cap.release()
+            if ret:
+                print(f"✅ Found working camera at index {camera_idx}")
+                return camera_idx
+    return None
 
 def main():
     """Main face locking application"""
@@ -488,11 +545,21 @@ def main():
     config = FaceLockConfig()
     face_locker = FaceLockingSystem(config, target_identity)
     
-    # Start camera
-    cap = cv2.VideoCapture(0)
-    if not cap.isOpened():
-        print("❌ Failed to open camera!")
+    # Find and start camera
+    camera_idx = find_available_camera()
+    if camera_idx is None:
+        print("❌ No working camera found!")
+        print("💡 Tip: Make sure your camera is connected and not being used by another application")
         return
+    
+    cap = cv2.VideoCapture(camera_idx)
+    if not cap.isOpened():
+        print(f"❌ Failed to open camera {camera_idx}!")
+        return
+    
+    # Set camera resolution to make frame bigger
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
     
     print("\n🚀 Face Locking System started!")
     print("Position the target person in front of the camera...")

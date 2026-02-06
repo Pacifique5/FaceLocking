@@ -27,7 +27,7 @@ def test_face_detection():
         return
     
     # Test camera
-    cap = cv2.VideoCapture(0)
+    cap = cv2.VideoCapture(2)
     if not cap.isOpened():
         print("❌ Failed to open camera")
         return

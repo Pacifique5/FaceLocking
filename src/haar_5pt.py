@@ -103,10 +103,10 @@ def _clip_box_xyxy(b: np.ndarray, W: int, H: int) -> np.ndarray:
     bb[3] = np.clip(bb[3], 0, H - 1)
     return bb
 
-def _bbox_from_5pt(kps: np.ndarray, pad_x: float = 0.55, pad_y_top: float = 0.85, pad_y_bot: float = 1.15) -> np.ndarray:
+def _bbox_from_5pt(kps: np.ndarray, pad_x: float = 2.5, pad_y_top: float = 3.0, pad_y_bot: float = 3.0) -> np.ndarray:
     """
-    Build a face bbox from 5 keypoints with asymmetric padding
-    (more forehead, more chin)
+    Build a face bbox from 5 keypoints with MASSIVE padding
+    to use the entire screen for better capture
     """
     k = kps.astype(np.float32)
     x_min = float(np.min(k[:, 0]))
@@ -331,7 +331,7 @@ class Haar5ptDetector:
                 print("[haar_5pt] Using geometric estimation - skipping consistency checks")
         else:
             # check if 5pt inside Haar box (only for MediaPipe)
-            margin = 0.35
+            margin = 2.0  # Very large margin for full screen detection
             x1m = x - margin * w
             y1m = y - margin * h
             x2m = x + (1.0 + margin) * w
@@ -348,8 +348,8 @@ class Haar5ptDetector:
                 print("[haar_5pt] 5pt geometry sanity failed -> reject")
             return []
 
-        # build bbox
-        box = _bbox_from_5pt(kps, pad_x=0.55, pad_y_top=0.85, pad_y_bot=1.15)
+        # build bbox - FULL SCREEN padding for maximum face capture
+        box = _bbox_from_5pt(kps, pad_x=2.5, pad_y_top=3.0, pad_y_bot=3.0)
         box = _clip_box_xyxy(box, W, H)
 
         # smooth
@@ -379,7 +379,7 @@ class Haar5ptDetector:
 # -------------------------
 
 def main():
-    cap = cv2.VideoCapture(0)
+    cap = cv2.VideoCapture(2)
     det = Haar5ptDetector(min_size=(70, 70), smooth_alpha=0.80, debug=True)
 
     print("Haar + 5pt (FaceMesh) test. Press q to quit.")

@@ -1,0 +1,13 @@
+Face Locking History for: Pacifique
+Session started: 2026-02-06 14:58:17
+==================================================
+Timestamp		Action Type	Description		Value
+----------------------------------------------------------------------
+14:58:18.347	movement		face moved left	82.000
+14:58:18.347	smile		smile or laugh detected	0.577
+----------------------------------------------------------------------
+Session ended: 2026-02-06 14:58:21
+Total actions recorded: 2
+Action Summary:
+  movement: 1
+  smile: 1
